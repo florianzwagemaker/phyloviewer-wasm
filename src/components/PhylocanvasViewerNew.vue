@@ -44,7 +44,7 @@ const isNodeMatched = (nodeName: string): boolean => {
     return false
   }
   
-  const metadataItem = props.metadata.find(item => item.accession === nodeName)
+  const metadataItem = props.metadata.find(item => item.accessionVersion === nodeName)
   if (metadataItem) {
     return Object.values(metadataItem).some(val =>
       val.toLowerCase().includes(props.searchTerm.toLowerCase())
@@ -58,11 +58,42 @@ const getNodeColor = (nodeName: string): string | null => {
     return null
   }
   
-  const metadataItem = props.metadata.find(item => item.accession === nodeName)
+  const metadataItem = props.metadata.find(item => item.accessionVersion === nodeName)
   if (metadataItem && metadataItem[props.selectedField] && props.colorMap[metadataItem[props.selectedField]]) {
     return props.colorMap[metadataItem[props.selectedField]]
   }
   return null
+}
+
+const generateStyles = (leaves: any[]) => {
+  if (!leaves || leaves.length === 0) {
+    return {};
+  }
+
+  const styles = {};
+
+  for (const leaf of leaves) {
+    if (leaf.id) {
+      const style = {};
+      // Search highlighting takes precedence
+      if (props.searchTerm && isNodeMatched(leaf.id)) {
+        style.fillColour = '#ff0000';
+        style.strokeColour = '#cc0000';
+        style.strokeWidth = 2;
+      } else {
+        // Then apply color mapping
+        const color = getNodeColor(leaf.id);
+        if (color) {
+          style.fillColour = color;
+        }
+      }
+
+      if (Object.keys(style).length > 0) {
+        styles[leaf.id] = style;
+      }
+    }
+  }
+  return styles;
 }
 
 // Function to load PhylocanvasGL globally like in the CodePen
@@ -180,9 +211,7 @@ const renderTree = async () => {
 
     // Apply styling after tree is rendered
     await nextTick()
-    setTimeout(() => {
-      applyNodeStyling()
-    }, 500) // Longer delay to ensure tree is fully rendered
+    applyNodeStyling()
 
   } catch (err) {
     console.error('Error rendering tree with PhylocanvasGL:', err)
@@ -215,58 +244,13 @@ const applyNodeStyling = () => {
 
   try {
     console.log('Applying node styling...')
-    console.log('Tree instance methods:', Object.getOwnPropertyNames(treeInstance))
-    console.log('Tree instance properties:', Object.keys(treeInstance))
+    const graph = treeInstance.getGraphAfterLayout();
+    const leaves = graph.leaves;
+    const newStyles = generateStyles(leaves);
     
-    // Check what properties and methods are available
-    if (treeInstance.tree) {
-      console.log('Tree data available:', treeInstance.tree)
-    }
-    
-    if (treeInstance.root) {
-      console.log('Root node available:', treeInstance.root)
-    }
-    
-    // Create updated props like in CodePen example
-    const updatedProps: any = { ...treeInstance.props }
-    
-    // Apply node colors based on metadata
-    if (props.selectedField && Object.keys(props.colorMap).length > 0) {
-      console.log('Applying color mapping for field:', props.selectedField)
-      
-      updatedProps.nodeStyles = (node: any) => {
-        if (node.isLeaf && node.label) {
-          const color = getNodeColor(node.label)
-          if (color) {
-            return { fill: color }
-          }
-        }
-        return {}
-      }
-    }
-    
-    // Apply search highlighting
-    if (props.searchTerm) {
-      console.log('Applying search highlighting for term:', props.searchTerm)
-      
-      updatedProps.nodeStyles = (node: any) => {
-        if (node.isLeaf && node.label) {
-          if (isNodeMatched(node.label)) {
-            return { fill: '#ff0000', stroke: '#cc0000', strokeWidth: 2 }
-          }
-          const color = getNodeColor(node.label)
-          if (color) {
-            return { fill: color }
-          }
-        }
-        return {}
-      }
-    }
-    
-    // Update props using setProps method like in CodePen
     if (typeof treeInstance.setProps === 'function') {
-      treeInstance.setProps(updatedProps)
-      console.log('Applied styling props using setProps:', updatedProps)
+      treeInstance.setProps({ styles: newStyles })
+      console.log('Applied styling props using setProps:', newStyles)
     }
     
     // Set up event handlers
@@ -314,37 +298,7 @@ watch(() => props.newick, () => {
 
 watch([() => props.colorMap, () => props.selectedField, () => props.searchTerm], () => {
   if (treeInstance && typeof treeInstance.setProps === 'function') {
-    // Re-apply styling when props change, following CodePen pattern
-    const updatedProps: any = { ...treeInstance.props }
-    
-    if (props.selectedField && Object.keys(props.colorMap).length > 0) {
-      updatedProps.nodeStyles = (node: any) => {
-        if (node.isLeaf && node.label) {
-          const color = getNodeColor(node.label)
-          if (color) {
-            return { fill: color }
-          }
-        }
-        return {}
-      }
-    }
-    
-    if (props.searchTerm) {
-      updatedProps.nodeStyles = (node: any) => {
-        if (node.isLeaf && node.label) {
-          if (isNodeMatched(node.label)) {
-            return { fill: '#ff0000', stroke: '#cc0000', strokeWidth: 2 }
-          }
-          const color = getNodeColor(node.label)
-          if (color) {
-            return { fill: color }
-          }
-        }
-        return {}
-      }
-    }
-    
-    treeInstance.setProps(updatedProps)
+    applyNodeStyling();
   }
 })
 </script>

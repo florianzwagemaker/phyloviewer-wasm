@@ -28,11 +28,8 @@ This document tracks the progress of the PhyloViewer project.
   - There technically is a side panel but i'd like to change it to a proper side-panel on the right side of the screen that you can hide.
 - [x] Implement tooltip for node information.
 - [x] Implement metadata-based color-coding.
-  - * not tested
 - [x] Implement legend for color-coding.
-- * not tested
 - [x] Implement search functionality in the side-panel.
-  - This is questionable, there currently is a search box but inputs are not reflected in the tree. This should be fixed.
 - [ ] Implement a ruler for the tree.
 
 ### Additional Features
