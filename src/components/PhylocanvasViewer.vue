@@ -35,31 +35,124 @@ const treeCanvas = ref<HTMLElement | null>(null)
 const error = ref<string | null>(null)
 let treeInstance: any = null
 
+// Global phylocanvas flag
+let phylocanvasLoaded = false
+
 // Helper functions
+const extractAccessionVersion = (nodeName: string): string => {
+  // Split the node name by '|' and return the first part
+  return nodeName.split('|')[0];
+};
+
 const isNodeMatched = (nodeName: string): boolean => {
+  const accessionVersion = extractAccessionVersion(nodeName);
   if (!props.searchTerm || !props.metadata.length) {
-    return false
+    return false;
   }
-  
-  const metadataItem = props.metadata.find(item => item.accession === nodeName)
+
+  const metadataItem = props.metadata.find(item => item.accessionVersion === accessionVersion);
   if (metadataItem) {
     return Object.values(metadataItem).some(val =>
       val.toLowerCase().includes(props.searchTerm.toLowerCase())
-    )
+    );
   }
-  return false
-}
+  return false;
+};
 
 const getNodeColor = (nodeName: string): string | null => {
+  const accessionVersion = extractAccessionVersion(nodeName);
   if (!props.selectedField || !Object.keys(props.colorMap).length || !props.metadata.length) {
-    return null
+    return null;
   }
-  
-  const metadataItem = props.metadata.find(item => item.accession === nodeName)
+
+  const metadataItem = props.metadata.find(item => item.accessionVersion === accessionVersion);
   if (metadataItem && metadataItem[props.selectedField] && props.colorMap[metadataItem[props.selectedField]]) {
-    return props.colorMap[metadataItem[props.selectedField]]
+    return props.colorMap[metadataItem[props.selectedField]];
   }
-  return null
+  return null;
+}
+
+const generateStyles = (leaves: any[]) => {
+  if (!leaves || leaves.length === 0) {
+    return {};
+  }
+
+  const styles = {};
+
+  for (const leaf of leaves) {
+    if (leaf.id) {
+      const style = {};
+      // Search highlighting takes precedence
+      if (props.searchTerm && isNodeMatched(leaf.id)) {
+        style.fillColour = '#ff0000';
+        style.strokeColour = '#cc0000';
+        style.strokeWidth = 2;
+      } else {
+        // Then apply color mapping
+        const color = getNodeColor(leaf.id);
+        if (color) {
+          style.fillColour = color;
+        }
+      }
+
+      if (Object.keys(style).length > 0) {
+        styles[leaf.id] = style;
+      }
+    }
+  }
+  return styles;
+}
+
+// Function to load PhylocanvasGL globally like in the CodePen
+const loadPhylocanvasGL = (): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    // Check if already loaded
+    if ((window as any).phylocanvas && (window as any).phylocanvas.PhylocanvasGL) {
+      phylocanvasLoaded = true
+      resolve()
+      return
+    }
+    
+    // Check if script is already being loaded
+    if (document.querySelector('script[src*="phylocanvas"]')) {
+      // Script is loading, wait for it
+      const checkInterval = setInterval(() => {
+        if ((window as any).phylocanvas && (window as any).phylocanvas.PhylocanvasGL) {
+          phylocanvasLoaded = true
+          clearInterval(checkInterval)
+          resolve()
+        }
+      }, 100)
+      
+      // Timeout after 10 seconds
+      setTimeout(() => {
+        clearInterval(checkInterval)
+        reject(new Error('PhylocanvasGL loading timeout'))
+      }, 10000)
+      return
+    }
+    
+    console.log('Loading PhylocanvasGL from CDN...')
+    
+    // Load the script globally like in CodePen
+    const script = document.createElement('script')
+    script.src = 'https://unpkg.com/@phylocanvas/phylocanvas.gl@latest/dist/bundle.min.js'
+    script.onload = () => {
+      // Wait a bit for the global to be available
+      setTimeout(() => {
+        if ((window as any).phylocanvas && (window as any).phylocanvas.PhylocanvasGL) {
+          console.log('PhylocanvasGL loaded successfully')
+          phylocanvasLoaded = true
+          resolve()
+        } else {
+          console.error('PhylocanvasGL not available after load. Available globals:', Object.keys(window))
+          reject(new Error('PhylocanvasGL not available after load'))
+        }
+      }, 500)
+    }
+    script.onerror = () => reject(new Error('Failed to load PhylocanvasGL script'))
+    document.head.appendChild(script)
+  })
 }
 
 const renderTree = async () => {
@@ -85,59 +178,18 @@ const renderTree = async () => {
     // Clear container
     treeCanvas.value.innerHTML = ''
 
-    console.log('Loading PhylocanvasGL...')
+    console.log('Ensuring PhylocanvasGL is loaded...')
     
-    // Try multiple import strategies to work around the bundling issue
-    let PhylocanvasGL: any = null
-    
-    try {
-      // Strategy 1: Check if it's already available globally (from CDN)
-      if ((window as any).PhylocanvasGL) {
-        PhylocanvasGL = (window as any).PhylocanvasGL
-        console.log('Using global PhylocanvasGL')
-      } else {
-        // Strategy 2: Dynamic import with error handling
-        console.log('Attempting dynamic import...')
-        const module = await import('@phylocanvas/phylocanvas.gl')
-        
-        // Try different export patterns (cast to any to satisfy TypeScript)
-        const anyModule: any = module
-        PhylocanvasGL = anyModule.default || anyModule.PhylocanvasGL || anyModule
-        
-        console.log('Available exports:', Object.keys(module))
-        console.log('PhylocanvasGL constructor:', PhylocanvasGL)
-        
-        // If it's still not a constructor, try to find it in the module
-        if (typeof PhylocanvasGL !== 'function') {
-          for (const [key, value] of Object.entries(module)) {
-            if (typeof value === 'function' && key.includes('Phylocanvas')) {
-              PhylocanvasGL = value
-              console.log(`Found PhylocanvasGL under key: ${key}`)
-              break
-            }
-          }
-        }
-      }
-    } catch (importError) {
-      console.error('Import error details:', importError)
-      
-      // Strategy 3: Try to load from CDN as fallback
-      if (!(window as any).PhylocanvasGL) {
-        console.log('Attempting to load PhylocanvasGL from CDN...')
-        try {
-          await loadPhylocanvasGLFromCDN()
-          PhylocanvasGL = (window as any).PhylocanvasGL
-        } catch (cdnError) {
-          console.error('CDN loading failed:', cdnError)
-          throw new Error(`Failed to load PhylocanvasGL: ${(importError as Error).message}`)
-        }
-      } else {
-        PhylocanvasGL = (window as any).PhylocanvasGL
-      }
+    // Ensure PhylocanvasGL is loaded
+    if (!phylocanvasLoaded) {
+      await loadPhylocanvasGL()
     }
     
-    if (!PhylocanvasGL || typeof PhylocanvasGL !== 'function') {
-      throw new Error('PhylocanvasGL constructor not found or not a function')
+    // Access PhylocanvasGL like in the CodePen example
+    const PhylocanvasGL = (window as any).phylocanvas.PhylocanvasGL
+    
+    if (!PhylocanvasGL) {
+      throw new Error('PhylocanvasGL constructor not found in global phylocanvas object')
     }
 
     console.log('Creating PhylocanvasGL instance...')
@@ -147,29 +199,26 @@ const renderTree = async () => {
     const width = containerRect.width || 800
     const height = containerRect.height || 600
     
-    // Create tree props following the exact documentation pattern
+    // Create tree props exactly like in the CodePen example
     const treeProps = {
-      size: { width, height },
       source: props.newick,
+      size: { width, height },
       showLabels: true,
       showLeafLabels: true,
-      alignLabels: true,
       interactive: true
     }
     
     console.log('Tree props:', treeProps)
     console.log('Container element:', treeCanvas.value)
     
-    // Create new PhylocanvasGL instance
+    // Create new PhylocanvasGL instance exactly like in CodePen
     treeInstance = new PhylocanvasGL(treeCanvas.value, treeProps)
 
     console.log('PhylocanvasGL instance created successfully:', treeInstance)
 
     // Apply styling after tree is rendered
     await nextTick()
-    setTimeout(() => {
-      applyNodeStyling()
-    }, 100) // Small delay to ensure tree is fully rendered
+    applyNodeStyling()
 
   } catch (err) {
     console.error('Error rendering tree with PhylocanvasGL:', err)
@@ -197,94 +246,23 @@ const renderTree = async () => {
   }
 }
 
-// Function to load PhylocanvasGL from CDN as fallback
-const loadPhylocanvasGLFromCDN = (): Promise<void> => {
-  return new Promise((resolve, reject) => {
-    if ((window as any).PhylocanvasGL) {
-      resolve()
-      return
-    }
-    
-    const script = document.createElement('script')
-    script.src = 'https://unpkg.com/@phylocanvas/phylocanvas.gl@1.58.0/dist/phylocanvas.js'
-    script.onload = () => {
-      if ((window as any).PhylocanvasGL) {
-        console.log('PhylocanvasGL loaded from CDN')
-        resolve()
-      } else {
-        reject(new Error('PhylocanvasGL not available after CDN load'))
-      }
-    }
-    script.onerror = () => reject(new Error('Failed to load PhylocanvasGL from CDN'))
-    document.head.appendChild(script)
-  })
-}
-
 const applyNodeStyling = () => {
   if (!treeInstance) return
 
   try {
     console.log('Applying node styling...')
-    console.log('Tree instance methods:', Object.getOwnPropertyNames(treeInstance))
-    console.log('Tree instance properties:', Object.keys(treeInstance))
+    const graph = treeInstance.getGraphAfterLayout();
+    const leaves = graph.leaves;
+    const newStyles = generateStyles(leaves);
     
-    // Check what properties and methods are available
-    if (treeInstance.tree) {
-      console.log('Tree data available:', treeInstance.tree)
-    }
-    
-    if (treeInstance.root) {
-      console.log('Root node available:', treeInstance.root)
-    }
-    
-    // Try to apply styling using available methods
     if (typeof treeInstance.setProps === 'function') {
-      console.log('setProps method available')
-      
-      const styleProps: any = {}
-      
-      // Apply node colors based on metadata
-      if (props.selectedField && Object.keys(props.colorMap).length > 0) {
-        console.log('Applying color mapping for field:', props.selectedField)
-        
-        styleProps.nodeStyles = (node: any) => {
-          if (node.isLeaf && node.label) {
-            const color = getNodeColor(node.label)
-            if (color) {
-              return { fill: color }
-            }
-          }
-          return {}
-        }
-      }
-      
-      // Apply search highlighting
-      if (props.searchTerm) {
-        console.log('Applying search highlighting for term:', props.searchTerm)
-        
-        styleProps.nodeStyles = (node: any) => {
-          if (node.isLeaf && node.label) {
-            if (isNodeMatched(node.label)) {
-              return { fill: '#ff0000', stroke: '#cc0000', strokeWidth: 2 }
-            }
-            const color = getNodeColor(node.label)
-            if (color) {
-              return { fill: color }
-            }
-          }
-          return {}
-        }
-      }
-      
-      if (Object.keys(styleProps).length > 0) {
-        treeInstance.setProps(styleProps)
-        console.log('Applied styling props:', styleProps)
-      }
+      treeInstance.setProps({ styles: newStyles })
+      console.log('Applied styling props using setProps:', newStyles)
     }
     
     // Set up event handlers
     if (typeof treeInstance.on === 'function') {
-      console.log('Event system available')
+      console.log('Setting up event handlers')
       
       treeInstance.on('node-click', (node: any) => {
         console.log('Node clicked:', node.label || 'internal node')
@@ -326,8 +304,8 @@ watch(() => props.newick, () => {
 })
 
 watch([() => props.colorMap, () => props.selectedField, () => props.searchTerm], () => {
-  if (treeInstance) {
-    applyNodeStyling()
+  if (treeInstance && typeof treeInstance.setProps === 'function') {
+    applyNodeStyling();
   }
 })
 </script>

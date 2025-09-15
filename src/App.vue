@@ -49,7 +49,7 @@ import { ref, watch } from 'vue'
 import FastaLoader from './components/FastaLoader.vue'
 import MetadataLoader from './components/MetadataLoader.vue'
 import PhyloTree from './components/PhyloTree.vue'
-import PhylocanvasViewer from './components/PhylocanvasViewerNew.vue'
+import PhylocanvasViewer from './components/PhylocanvasViewer.vue'
 import SidePanel from './components/SidePanel.vue'
 import './App.css'
 
