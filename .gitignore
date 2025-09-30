@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+phylocanvasGL_docs_methods.txt
+phylocanvasGL_docs_properties.txt
