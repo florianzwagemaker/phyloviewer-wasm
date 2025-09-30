@@ -30,7 +30,8 @@ This document tracks the progress of the PhyloViewer project.
 - [x] Implement metadata-based color-coding.
 - [x] Implement legend for color-coding.
 - [x] Implement search functionality in the side-panel.
-- [ ] Implement a ruler for the tree.
+- [x] Implement a ruler for the tree.
+- [x] Implement pie charts on internal nodes showing metadata distribution of descendants.
 
 ### Additional Features
 - [ ] Implement "Back to Source" link in a tooltip on nodes.

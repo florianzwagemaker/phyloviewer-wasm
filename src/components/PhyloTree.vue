@@ -104,7 +104,7 @@ watch(() => props.fastaContent, (newContent) => {
 
 <style scoped>
 .phylo-tree {
-  padding: 10px;
+  /* padding: 10px; */
 }
 
 .loading {

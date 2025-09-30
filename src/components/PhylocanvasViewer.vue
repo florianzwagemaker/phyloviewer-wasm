@@ -27,6 +27,20 @@
         />
         Show Scale Bar
       </label>
+      <label class="control-item">
+        <input 
+          type="checkbox" 
+          v-model="showPieCharts"
+          @change="updatePieChartsDisplay"
+        />
+        Show Pie Charts on Internal Nodes
+      </label>
+      <div v-if="showPieCharts" class="pie-chart-help">
+        <small>💡 Click internal nodes to collapse/expand them. Collapsed nodes show pie charts automatically.</small>
+      </div>
+      <div class="debug-info">
+        <small>🐛 Check browser console for click event logs</small>
+      </div>
     </div>
     <div 
       ref="treeCanvas" 
@@ -45,6 +59,49 @@
       </div>
     </div>
   </div>
+  
+  <!-- Node Action Tooltip - Outside container so it can overflow freely -->
+  <Teleport to="body" v-if="nodeTooltip.visible">
+    <div 
+      class="node-tooltip"
+      :class="{ 'dragging': nodeTooltip.isDragging }"
+      :style="nodeTooltipGlobalStyle"
+    >
+      <div 
+        class="tooltip-header draggable-header"
+        @mousedown="startDrag"
+      >
+        <strong>{{ nodeTooltip.nodeType }}</strong>
+        <div class="header-controls">
+          <span class="drag-hint">📋 Drag me</span>
+          <button class="tooltip-close" @click="hideNodeTooltip">×</button>
+        </div>
+      </div>
+      <div class="tooltip-content">
+        <div v-if="nodeTooltip.isInternal" class="tooltip-actions">
+          <button 
+            class="tooltip-btn collapse-btn"
+            @click="toggleNodeCollapse"
+          >
+            {{ nodeTooltip.isCollapsed ? 'Expand Node' : 'Collapse Node' }}
+          </button>
+          <div v-if="showPieCharts && nodeTooltip.pieChartData" class="pie-info">
+            <small>{{ nodeTooltip.descendantCount }} descendants with {{ nodeTooltip.pieChartData.length }} different {{ props.selectedField }} values</small>
+          </div>
+        </div>
+        <div v-else class="leaf-info">
+          <div v-if="nodeTooltip.metadata">
+            <div v-for="(value, key) in nodeTooltip.metadata" :key="key" class="metadata-item">
+              <strong>{{ key }}:</strong> {{ value }}
+            </div>
+          </div>
+          <div v-else>
+            <small>No metadata available</small>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -72,9 +129,29 @@ const error = ref<string | null>(null)
 const showBranchLengths = ref(true) // Show scale by default
 const showLeafLabels = ref(true) // Show leaf labels by default
 const showScaleBar = ref(true) // Show custom scale bar by default
+const showPieCharts = ref(false) // Show pie charts on internal nodes
 const scaleBarLength = ref(100) // Length in pixels
 const scaleBarValue = ref(0.1) // Actual distance value
 const treeInstance = ref<any>(null) // Make reactive so v-if works
+
+// Node tooltip state
+const nodeTooltip = ref({
+  visible: false,
+  x: 0,
+  y: 0,
+  node: null as any,
+  nodeType: '',
+  isInternal: false,
+  isCollapsed: false,
+  metadata: null as any,
+  pieChartData: null as any,
+  descendantCount: 0,
+  isDragging: false,
+  dragStartX: 0,
+  dragStartY: 0,
+  dragOffsetX: 0,
+  dragOffsetY: 0
+})
 
 // Global phylocanvas flag
 let phylocanvasLoaded = false
@@ -93,6 +170,42 @@ const scaleBarLabel = computed(() => {
     return `${(scaleBarValue.value * 1000).toFixed(1)} m`
   } else {
     return `${scaleBarValue.value.toFixed(3)}`
+  }
+})
+
+// Computed property for tooltip positioning (global/fixed to body)
+const nodeTooltipGlobalStyle = computed(() => {
+  // Base position with drag offset
+  let x = nodeTooltip.value.x + nodeTooltip.value.dragOffsetX
+  let y = nodeTooltip.value.y + nodeTooltip.value.dragOffsetY
+  
+  // Smart positioning to keep tooltip on screen (but don't auto-adjust when dragging)
+  if (!nodeTooltip.value.isDragging) {
+    // Approximate tooltip dimensions (will be more accurate after render)
+    const tooltipWidth = 300
+    const tooltipHeight = 200
+    
+    // Adjust if tooltip would go off the right edge
+    if (x + tooltipWidth > window.innerWidth) {
+      x = window.innerWidth - tooltipWidth - 10
+    }
+    
+    // Adjust if tooltip would go off the bottom edge
+    if (y + tooltipHeight > window.innerHeight) {
+      y = window.innerHeight - tooltipHeight - 10
+    }
+    
+    // Ensure tooltip doesn't go off the left or top edge
+    x = Math.max(10, x)
+    y = Math.max(10, y)
+  }
+  
+  return {
+    position: 'fixed' as const,
+    left: `${x}px`,
+    top: `${y}px`,
+    zIndex: 2000,
+    cursor: nodeTooltip.value.isDragging ? 'grabbing' : 'default'
   }
 })
 
@@ -159,6 +272,140 @@ const generateStyles = (leaves: any[]) => {
     }
   }
   return styles;
+}
+
+// Function to create metadata for pie charts based on leaf descendants
+const createMetadataForPieCharts = () => {
+  if (!props.metadata || !props.selectedField) {
+    return {};
+  }
+
+  // Create a metadata object that maps node IDs to pie chart data
+  const pieMetadata: Record<string, any> = {};
+  
+  // For now, we'll create simple metadata for leaves
+  // In a real implementation, you'd calculate which descendants belong to which internal node
+  props.metadata.forEach(item => {
+    if (item.accessionVersion && props.selectedField && item[props.selectedField]) {
+      pieMetadata[item.accessionVersion] = {
+        [props.selectedField as string]: item[props.selectedField]
+      };
+    }
+  });
+
+  return pieMetadata;
+}
+
+// Tooltip functions
+const showNodeTooltip = (node: any, canvasX: number, canvasY: number) => {
+  console.log('Showing tooltip for node:', node)
+  
+  // Calculate global screen coordinates
+  const rect = treeCanvas.value?.getBoundingClientRect()
+  if (!rect) return
+  
+  const globalX = rect.left + canvasX + 10 // Offset from click position
+  const globalY = rect.top + canvasY - 10
+  
+  nodeTooltip.value.visible = true
+  nodeTooltip.value.x = globalX
+  nodeTooltip.value.y = globalY
+  nodeTooltip.value.node = node
+  nodeTooltip.value.isInternal = !node.isLeaf
+  
+  console.log('Tooltip positioned at global coords:', globalX, globalY)
+  
+  if (node.isLeaf) {
+    // Leaf node
+    nodeTooltip.value.nodeType = 'Leaf Node'
+    nodeTooltip.value.isCollapsed = false
+    
+    // Get metadata for leaf
+    const accessionVersion = extractAccessionVersion(node.id || node.label || '')
+    const metadataItem = props.metadata.find(item => item.accessionVersion === accessionVersion)
+    nodeTooltip.value.metadata = metadataItem || null
+    nodeTooltip.value.pieChartData = null
+    nodeTooltip.value.descendantCount = 0
+  } else {
+    // Internal node
+    nodeTooltip.value.nodeType = 'Internal Node'
+    nodeTooltip.value.isCollapsed = node.collapsed || false
+    nodeTooltip.value.metadata = null
+    
+    // Get pie chart data for internal node
+    const descendants = getDescendantLeaves(node)
+    nodeTooltip.value.descendantCount = descendants.length
+    const pieData = calculatePieChartData(descendants)
+    nodeTooltip.value.pieChartData = pieData.length > 0 ? pieData : null
+  }
+}
+
+const hideNodeTooltip = () => {
+  nodeTooltip.value.visible = false
+  nodeTooltip.value.node = null
+  nodeTooltip.value.isDragging = false
+  nodeTooltip.value.dragOffsetX = 0
+  nodeTooltip.value.dragOffsetY = 0
+}
+
+// Drag functionality for tooltip
+const startDrag = (event: MouseEvent) => {
+  event.preventDefault()
+  nodeTooltip.value.isDragging = true
+  nodeTooltip.value.dragStartX = event.clientX
+  nodeTooltip.value.dragStartY = event.clientY
+  
+  console.log('Started dragging tooltip at:', event.clientX, event.clientY)
+  
+  // Add global event listeners
+  document.addEventListener('mousemove', onDrag)
+  document.addEventListener('mouseup', stopDrag)
+}
+
+const onDrag = (event: MouseEvent) => {
+  if (!nodeTooltip.value.isDragging) return
+  
+  const deltaX = event.clientX - nodeTooltip.value.dragStartX
+  const deltaY = event.clientY - nodeTooltip.value.dragStartY
+  
+  nodeTooltip.value.dragOffsetX = deltaX
+  nodeTooltip.value.dragOffsetY = deltaY
+}
+
+const stopDrag = () => {
+  if (!nodeTooltip.value.isDragging) return
+  
+  console.log('Stopped dragging tooltip')
+  
+  // Update base position to include the drag offset
+  nodeTooltip.value.x += nodeTooltip.value.dragOffsetX
+  nodeTooltip.value.y += nodeTooltip.value.dragOffsetY
+  
+  // Reset drag state
+  nodeTooltip.value.isDragging = false
+  nodeTooltip.value.dragOffsetX = 0
+  nodeTooltip.value.dragOffsetY = 0
+  
+  // Remove global event listeners
+  document.removeEventListener('mousemove', onDrag)
+  document.removeEventListener('mouseup', stopDrag)
+}
+
+const toggleNodeCollapse = () => {
+  if (!nodeTooltip.value.node || nodeTooltip.value.node.isLeaf) return
+  
+  if (treeInstance.value && typeof treeInstance.value.collapseNode === 'function') {
+    treeInstance.value.collapseNode(nodeTooltip.value.node.id)
+    console.log('Toggled collapse for node:', nodeTooltip.value.node.id)
+    
+    // Update tooltip state
+    nodeTooltip.value.isCollapsed = !nodeTooltip.value.isCollapsed
+    
+    // Hide tooltip after action
+    setTimeout(() => {
+      hideNodeTooltip()
+    }, 200)
+  }
 }
 
 // Function to load PhylocanvasGL globally like in the CodePen
@@ -257,6 +504,8 @@ const renderTree = async () => {
     const width = containerRect.width || 800
     const height = containerRect.height || 600
     
+    console.log('Container dimensions:', { width, height })
+    
     // Create tree props with scale bar enabled
     const treeProps = {
       source: props.newick,
@@ -264,21 +513,50 @@ const renderTree = async () => {
       showLabels: true,
       showLeafLabels: showLeafLabels.value,
       showBranchLengths: showBranchLengths.value, // This shows the scale/branch lengths
+      showPiecharts: showPieCharts.value, // Enable pie charts for collapsed nodes
+      showInternalLabels: false, // Don't show internal node labels (those floats you're seeing)
+      metadata: createMetadataForPieCharts(), // Prepare metadata for pie charts
       interactive: true,
-      padding: 20 // Add some padding to ensure scale is visible
+      padding: 40 // Increased padding to prevent branches from reaching container edges
     }
     
     console.log('Tree props:', treeProps)
     console.log('Container element:', treeCanvas.value)
     
-    // Create new PhylocanvasGL instance exactly like in CodePen
+    // Create new PhylocanvasGL instance
     treeInstance.value = new PhylocanvasGL(treeCanvas.value, treeProps)
+    
+    // Override the selectNode method after creation
+    const originalSelectNode = treeInstance.value.selectNode
+    treeInstance.value.selectNode = function(node: any) {
+      console.log('selectNode called with:', node)
+      
+      if (node) {
+        console.log('Node clicked via selectNode:', node.label || 'internal node', node)
+        
+        // Use node position if available, otherwise center of canvas
+        const x = (node.x || 200)
+        const y = (node.y || 200)
+        
+        console.log('Showing tooltip at canvas coords:', node.x, node.y)
+        showNodeTooltip(node, x, y)
+      } else {
+        console.log('Canvas clicked (no node)')
+        hideNodeTooltip()
+      }
+      
+      // Call original method if it exists
+      if (originalSelectNode) {
+        originalSelectNode.call(this, node)
+      }
+    }
 
     console.log('PhylocanvasGL instance created successfully:', treeInstance.value)
 
     // Apply styling after tree is rendered
     await nextTick()
     applyNodeStyling()
+    addPieChartLayer()
     calculateScaleBar()
 
   } catch (err) {
@@ -321,20 +599,10 @@ const applyNodeStyling = () => {
       console.log('Applied styling props using setProps:', newStyles)
     }
     
-    // Set up event handlers
+    // Set up event handlers for zoom/pan to update scale bar
     if (typeof treeInstance.value.on === 'function') {
-      console.log('Setting up event handlers')
+      console.log('Setting up zoom/pan event handlers')
       
-      treeInstance.value.on('node-click', (node: any) => {
-        console.log('Node clicked:', node.label || 'internal node')
-        if (node.isLeaf && node.label) {
-          const metadataItem = props.metadata.find(item => item.accession === node.label)
-          if (metadataItem) {
-            console.log('Node metadata:', metadataItem)
-          }
-        }
-      })
-
       // Add event listeners for zoom/pan to update scale bar
       treeInstance.value.on('zoom', () => {
         calculateScaleBar()
@@ -348,6 +616,122 @@ const applyNodeStyling = () => {
   } catch (err) {
     console.error('Error applying node styling:', err)
   }
+}
+
+// Function to add custom pie chart layer for internal nodes
+const addPieChartLayer = () => {
+  if (!treeInstance.value) return
+
+  try {
+    // Remove existing layer if it exists
+    if (typeof treeInstance.value.removeLayer === 'function') {
+      try {
+        treeInstance.value.removeLayer('pie-charts')
+      } catch (e) {
+        // Layer might not exist, that's fine
+      }
+    }
+
+    if (!showPieCharts.value || !props.selectedField || !props.metadata.length) {
+      // Reset pie chart properties when disabled
+      if (treeInstance.value) {
+        treeInstance.value.setProps({
+          showPieCharts: false,
+          alignLabels: false, // Keep labels next to their nodes
+          showLabels: true
+        })
+      }
+      return
+    }
+
+    console.log('Enabling pie charts with metadata field:', props.selectedField)
+
+    // Use the built-in pie chart functionality for collapsed nodes
+    treeInstance.value.setProps({
+      showPieCharts: true,
+      alignLabels: false, // Keep labels next to their nodes, not aligned to the right
+      showLabels: true
+    })
+
+    console.log('Pie charts enabled successfully')
+
+  } catch (err) {
+    console.error('Error configuring pie charts:', err)
+  }
+}
+
+// Helper function to get all descendant leaves of a node
+const getDescendantLeaves = (node: any): any[] => {
+  if (node.isLeaf) return [node]
+  
+  const leaves: any[] = []
+  if (node.children) {
+    for (const child of node.children) {
+      leaves.push(...getDescendantLeaves(child))
+    }
+  }
+  return leaves
+}
+
+// Helper function to calculate pie chart data from descendants
+const calculatePieChartData = (descendants: any[]) => {
+  if (!props.selectedField || !props.metadata.length) {
+    console.log('No selected field or metadata for pie chart')
+    return []
+  }
+
+  console.log('Calculating pie chart data for', descendants.length, 'descendants')
+
+  const counts: Record<string, number> = {}
+  let total = 0
+
+  // Count occurrences of each metadata value
+  descendants.forEach(leaf => {
+    const accessionVersion = extractAccessionVersion(leaf.id || leaf.label || '')
+    const metadataItem = props.metadata.find(item => item.accessionVersion === accessionVersion)
+    
+    console.log('Processing leaf:', accessionVersion, 'metadata found:', !!metadataItem)
+    
+    if (metadataItem && props.selectedField && metadataItem[props.selectedField]) {
+      const value = metadataItem[props.selectedField]
+      counts[value] = (counts[value] || 0) + 1
+      total++
+      console.log('Added count for:', value, 'total now:', counts[value])
+    }
+  })
+
+  console.log('Final counts:', counts, 'total:', total)
+
+  if (total === 0) {
+    console.log('No valid metadata found for pie chart')
+    return []
+  }
+
+  // Convert to pie chart segments
+  const segments = []
+  let currentAngle = 0
+
+  for (const [value, count] of Object.entries(counts)) {
+    const proportion = count / total
+    const angle = proportion * 2 * Math.PI
+    const color = props.colorMap[value] || '#cccccc'
+    
+    console.log('Creating segment for:', value, 'count:', count, 'proportion:', proportion, 'color:', color)
+    
+    segments.push({
+      startAngle: currentAngle,
+      endAngle: currentAngle + angle,
+      color,
+      value,
+      count,
+      proportion
+    })
+    
+    currentAngle += angle
+  }
+
+  console.log('Created', segments.length, 'pie segments')
+  return segments
 }
 
 // Function to calculate appropriate scale bar
@@ -423,6 +807,19 @@ const updateLeafLabelsDisplay = () => {
   }
 }
 
+const updatePieChartsDisplay = () => {
+  if (treeInstance.value && typeof treeInstance.value.setProps === 'function') {
+    treeInstance.value.setProps({ 
+      showPiecharts: showPieCharts.value,
+      metadata: createMetadataForPieCharts() 
+    })
+    console.log('Updated showPiecharts to:', showPieCharts.value)
+    
+    // Re-add the custom pie chart layer
+    addPieChartLayer()
+  }
+}
+
 // Lifecycle hooks
 onMounted(() => {
   renderTree()
@@ -439,6 +836,10 @@ onUnmounted(() => {
     }
     treeInstance.value = null
   }
+  
+  // Clean up drag event listeners
+  document.removeEventListener('mousemove', onDrag)
+  document.removeEventListener('mouseup', stopDrag)
 })
 
 // Watchers
@@ -449,6 +850,10 @@ watch(() => props.newick, () => {
 watch([() => props.colorMap, () => props.selectedField, () => props.searchTerm], () => {
   if (treeInstance.value && typeof treeInstance.value.setProps === 'function') {
     applyNodeStyling();
+    // Update pie chart metadata when field changes
+    if (showPieCharts.value) {
+      updatePieChartsDisplay();
+    }
   }
 })
 </script>
@@ -458,6 +863,9 @@ watch([() => props.colorMap, () => props.selectedField, () => props.searchTerm],
   width: 100%;
   height: 100%;
   position: relative;
+  overflow: hidden; /* Prevent content from extending outside container */
+  border: 1px solid #ddd; /* Optional: add border to visualize container bounds */
+  border-radius: 4px;
 }
 
 .tree-controls {
@@ -481,10 +889,40 @@ watch([() => props.colorMap, () => props.selectedField, () => props.searchTerm],
   margin: 0;
 }
 
+.pie-chart-help {
+  grid-column: 1 / -1;
+  background: rgba(0, 123, 255, 0.1);
+  border: 1px solid rgba(0, 123, 255, 0.3);
+  border-radius: 4px;
+  padding: 5px 8px;
+  margin-top: 5px;
+}
+
+.pie-chart-help small {
+  color: #0056b3;
+  font-style: italic;
+}
+
+.debug-info {
+  grid-column: 1 / -1;
+  background: rgba(255, 193, 7, 0.1);
+  border: 1px solid rgba(255, 193, 7, 0.3);
+  border-radius: 4px;
+  padding: 5px 8px;
+  margin-top: 5px;
+}
+
+.debug-info small {
+  color: #856404;
+  font-style: italic;
+}
+
 .tree-canvas {
   width: 100%;
   height: 100%;
   min-height: 600px;
+  overflow: hidden; /* Ensure tree content stays within bounds */
+  box-sizing: border-box; /* Include padding/border in width/height calculations */
 }
 
 .error-message {
@@ -527,5 +965,133 @@ watch([() => props.colorMap, () => props.selectedField, () => props.searchTerm],
   color: #333;
   font-weight: bold;
   font-size: 11px;
+}
+
+.node-tooltip {
+  background: white;
+  border: 2px solid #333;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  min-width: 200px;
+  max-width: 300px;
+  font-size: 13px;
+  pointer-events: auto;
+}
+
+.tooltip-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f8f9fa;
+  padding: 8px 12px;
+  border-bottom: 1px solid #ddd;
+  border-radius: 6px 6px 0 0;
+}
+
+.draggable-header {
+  cursor: grab;
+  user-select: none;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+}
+
+.draggable-header:hover {
+  background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
+}
+
+.draggable-header:active {
+  cursor: grabbing;
+}
+
+.node-tooltip.dragging {
+  transition: none; /* Disable transitions while dragging */
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.drag-hint {
+  font-size: 11px;
+  color: #6c757d;
+  font-style: italic;
+}
+
+.tooltip-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #666;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tooltip-close:hover {
+  color: #333;
+  background: rgba(0,0,0,0.1);
+  border-radius: 3px;
+}
+
+.tooltip-content {
+  padding: 12px;
+}
+
+.tooltip-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tooltip-btn {
+  background: #007bff;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.tooltip-btn:hover {
+  background: #0056b3;
+}
+
+.collapse-btn {
+  background: #28a745;
+}
+
+.collapse-btn:hover {
+  background: #1e7e34;
+}
+
+.pie-info {
+  background: rgba(0, 123, 255, 0.1);
+  border: 1px solid rgba(0, 123, 255, 0.3);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: #0056b3;
+}
+
+.leaf-info .metadata-item {
+  margin: 4px 0;
+  padding: 2px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.leaf-info .metadata-item:last-child {
+  border-bottom: none;
+}
+
+.leaf-info strong {
+  color: #555;
+  margin-right: 8px;
 }
 </style>
