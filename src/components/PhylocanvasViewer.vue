@@ -3,16 +3,52 @@
     <div v-if="error" class="error-message">
       {{ error }}
     </div>
+    <div class="tree-controls" v-if="treeInstance">
+      <label class="control-item">
+        <input 
+          type="checkbox" 
+          v-model="showBranchLengths" 
+          @change="updateBranchLengthsDisplay"
+        />
+        Show Branch Lengths
+      </label>
+      <label class="control-item">
+        <input 
+          type="checkbox" 
+          v-model="showLeafLabels" 
+          @change="updateLeafLabelsDisplay"
+        />
+        Show Leaf Labels
+      </label>
+      <label class="control-item">
+        <input 
+          type="checkbox" 
+          v-model="showScaleBar"
+        />
+        Show Scale Bar
+      </label>
+    </div>
     <div 
       ref="treeCanvas" 
       class="tree-canvas"
       style="width: 100%; height: 100%;"
     ></div>
+    <!-- Custom Scale Bar -->
+    <div 
+      v-if="treeInstance && showScaleBar" 
+      class="scale-bar-container"
+      :style="scaleBarStyle"
+    >
+      <div class="scale-bar">
+        <div class="scale-bar-line"></div>
+        <div class="scale-bar-label">{{ scaleBarLabel }}</div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
 
 // Props
 interface Props {
@@ -33,10 +69,32 @@ const props = withDefaults(defineProps<Props>(), {
 // Reactive state
 const treeCanvas = ref<HTMLElement | null>(null)
 const error = ref<string | null>(null)
-let treeInstance: any = null
+const showBranchLengths = ref(true) // Show scale by default
+const showLeafLabels = ref(true) // Show leaf labels by default
+const showScaleBar = ref(true) // Show custom scale bar by default
+const scaleBarLength = ref(100) // Length in pixels
+const scaleBarValue = ref(0.1) // Actual distance value
+const treeInstance = ref<any>(null) // Make reactive so v-if works
 
 // Global phylocanvas flag
 let phylocanvasLoaded = false
+
+// Computed properties for scale bar
+const scaleBarStyle = computed(() => ({
+  bottom: '20px',
+  left: '20px',
+  width: `${scaleBarLength.value}px`
+}))
+
+const scaleBarLabel = computed(() => {
+  if (scaleBarValue.value < 0.001) {
+    return `${(scaleBarValue.value * 1000000).toFixed(1)} µ`
+  } else if (scaleBarValue.value < 1) {
+    return `${(scaleBarValue.value * 1000).toFixed(1)} m`
+  } else {
+    return `${scaleBarValue.value.toFixed(3)}`
+  }
+})
 
 // Helper functions
 const extractAccessionVersion = (nodeName: string): string => {
@@ -77,11 +135,11 @@ const generateStyles = (leaves: any[]) => {
     return {};
   }
 
-  const styles = {};
+  const styles: Record<string, any> = {};
 
   for (const leaf of leaves) {
     if (leaf.id) {
-      const style = {};
+      const style: Record<string, any> = {};
       // Search highlighting takes precedence
       if (props.searchTerm && isNodeMatched(leaf.id)) {
         style.fillColour = '#ff0000';
@@ -164,15 +222,15 @@ const renderTree = async () => {
     error.value = null
     
     // Clean up existing tree
-    if (treeInstance) {
+    if (treeInstance.value) {
       try {
-        if (typeof treeInstance.destroy === 'function') {
-          treeInstance.destroy()
+        if (typeof treeInstance.value.destroy === 'function') {
+          treeInstance.value.destroy()
         }
       } catch (e) {
         console.log('Error destroying previous tree instance:', e)
       }
-      treeInstance = null
+      treeInstance.value = null
     }
 
     // Clear container
@@ -199,26 +257,29 @@ const renderTree = async () => {
     const width = containerRect.width || 800
     const height = containerRect.height || 600
     
-    // Create tree props exactly like in the CodePen example
+    // Create tree props with scale bar enabled
     const treeProps = {
       source: props.newick,
       size: { width, height },
       showLabels: true,
-      showLeafLabels: true,
-      interactive: true
+      showLeafLabels: showLeafLabels.value,
+      showBranchLengths: showBranchLengths.value, // This shows the scale/branch lengths
+      interactive: true,
+      padding: 20 // Add some padding to ensure scale is visible
     }
     
     console.log('Tree props:', treeProps)
     console.log('Container element:', treeCanvas.value)
     
     // Create new PhylocanvasGL instance exactly like in CodePen
-    treeInstance = new PhylocanvasGL(treeCanvas.value, treeProps)
+    treeInstance.value = new PhylocanvasGL(treeCanvas.value, treeProps)
 
-    console.log('PhylocanvasGL instance created successfully:', treeInstance)
+    console.log('PhylocanvasGL instance created successfully:', treeInstance.value)
 
     // Apply styling after tree is rendered
     await nextTick()
     applyNodeStyling()
+    calculateScaleBar()
 
   } catch (err) {
     console.error('Error rendering tree with PhylocanvasGL:', err)
@@ -247,24 +308,24 @@ const renderTree = async () => {
 }
 
 const applyNodeStyling = () => {
-  if (!treeInstance) return
+  if (!treeInstance.value) return
 
   try {
     console.log('Applying node styling...')
-    const graph = treeInstance.getGraphAfterLayout();
+    const graph = treeInstance.value.getGraphAfterLayout();
     const leaves = graph.leaves;
     const newStyles = generateStyles(leaves);
     
-    if (typeof treeInstance.setProps === 'function') {
-      treeInstance.setProps({ styles: newStyles })
+    if (typeof treeInstance.value.setProps === 'function') {
+      treeInstance.value.setProps({ styles: newStyles })
       console.log('Applied styling props using setProps:', newStyles)
     }
     
     // Set up event handlers
-    if (typeof treeInstance.on === 'function') {
+    if (typeof treeInstance.value.on === 'function') {
       console.log('Setting up event handlers')
       
-      treeInstance.on('node-click', (node: any) => {
+      treeInstance.value.on('node-click', (node: any) => {
         console.log('Node clicked:', node.label || 'internal node')
         if (node.isLeaf && node.label) {
           const metadataItem = props.metadata.find(item => item.accession === node.label)
@@ -273,10 +334,92 @@ const applyNodeStyling = () => {
           }
         }
       })
+
+      // Add event listeners for zoom/pan to update scale bar
+      treeInstance.value.on('zoom', () => {
+        calculateScaleBar()
+      })
+      
+      treeInstance.value.on('pan', () => {
+        calculateScaleBar()
+      })
     }
 
   } catch (err) {
     console.error('Error applying node styling:', err)
+  }
+}
+
+// Function to calculate appropriate scale bar
+const calculateScaleBar = () => {
+  if (!treeInstance.value) return
+
+  try {
+    // Get the current scale from PhylocanvasGL
+    const branchScale = treeInstance.value.getBranchScale ? treeInstance.value.getBranchScale() : 1
+    const zoom = treeInstance.value.getZoom ? treeInstance.value.getZoom() : 0
+    const currentScale = branchScale * Math.pow(2, zoom)
+    
+    // Calculate a nice round number for the scale bar
+    // We want the scale bar to be around 100 pixels long
+    const targetPixelLength = 100
+    const actualDistance = targetPixelLength / currentScale
+    
+    // Round to a nice number (1, 2, 5, 10, 20, 50, 100, etc.)
+    const magnitude = Math.pow(10, Math.floor(Math.log10(actualDistance)))
+    const normalized = actualDistance / magnitude
+    
+    let niceDistance
+    if (normalized <= 1) {
+      niceDistance = magnitude
+    } else if (normalized <= 2) {
+      niceDistance = 2 * magnitude
+    } else if (normalized <= 5) {
+      niceDistance = 5 * magnitude
+    } else {
+      niceDistance = 10 * magnitude
+    }
+    
+    // Update scale bar values
+    scaleBarValue.value = niceDistance
+    scaleBarLength.value = niceDistance * currentScale
+    
+    console.log('Scale bar calculated:', {
+      branchScale,
+      zoom,
+      currentScale,
+      actualDistance,
+      niceDistance,
+      pixelLength: scaleBarLength.value
+    })
+    
+    console.log('Scale bar should be visible:', {
+      showScaleBar: showScaleBar.value,
+      hasTreeInstance: !!treeInstance.value,
+      scaleBarValue: scaleBarValue.value,
+      scaleBarLength: scaleBarLength.value
+    })
+    
+  } catch (err) {
+    console.warn('Could not calculate scale bar:', err)
+    // Fallback values
+    scaleBarValue.value = 0.1
+    scaleBarLength.value = 100
+  }
+}
+
+// Control update functions
+const updateBranchLengthsDisplay = () => {
+  if (treeInstance.value && typeof treeInstance.value.setProps === 'function') {
+    treeInstance.value.setProps({ showBranchLengths: showBranchLengths.value })
+    console.log('Updated showBranchLengths to:', showBranchLengths.value)
+  }
+}
+
+const updateLeafLabelsDisplay = () => {
+  if (treeInstance.value && typeof treeInstance.value.setProps === 'function') {
+    treeInstance.value.setProps({ showLeafLabels: showLeafLabels.value })
+    console.log('Updated showLeafLabels to:', showLeafLabels.value)
   }
 }
 
@@ -286,15 +429,15 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (treeInstance) {
+  if (treeInstance.value) {
     try {
-      if (typeof treeInstance.destroy === 'function') {
-        treeInstance.destroy()
+      if (typeof treeInstance.value.destroy === 'function') {
+        treeInstance.value.destroy()
       }
     } catch (e) {
       console.log('Error destroying tree instance:', e)
     }
-    treeInstance = null
+    treeInstance.value = null
   }
 })
 
@@ -304,7 +447,7 @@ watch(() => props.newick, () => {
 })
 
 watch([() => props.colorMap, () => props.selectedField, () => props.searchTerm], () => {
-  if (treeInstance && typeof treeInstance.setProps === 'function') {
+  if (treeInstance.value && typeof treeInstance.value.setProps === 'function') {
     applyNodeStyling();
   }
 })
@@ -315,6 +458,27 @@ watch([() => props.colorMap, () => props.selectedField, () => props.searchTerm],
   width: 100%;
   height: 100%;
   position: relative;
+}
+
+.tree-controls {
+  display: flex;
+  gap: 15px;
+  padding: 10px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #ddd;
+  border-radius: 4px 4px 0 0;
+}
+
+.control-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.control-item input[type="checkbox"] {
+  margin: 0;
 }
 
 .tree-canvas {
@@ -330,5 +494,38 @@ watch([() => props.colorMap, () => props.selectedField, () => props.searchTerm],
   border: 1px solid #fcc;
   border-radius: 4px;
   margin: 10px;
+}
+
+.scale-bar-container {
+  position: absolute;
+  z-index: 1000;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.scale-bar {
+  font-size: 12px;
+  font-family: monospace;
+  color: #333;
+}
+
+.scale-bar-line {
+  height: 2px;
+  background: #333;
+  border-left: 2px solid #333;
+  border-right: 2px solid #333;
+  margin-bottom: 4px;
+  width: 100%;
+}
+
+.scale-bar-label {
+  text-align: center;
+  color: #333;
+  font-weight: bold;
+  font-size: 11px;
 }
 </style>
