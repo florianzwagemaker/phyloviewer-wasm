@@ -536,7 +536,7 @@ const loadPhylocanvasGL = (): Promise<void> => {
     
     // Create and load script tag
     const script = document.createElement('script')
-    script.src = 'https://unpkg.com/@phylocanvas/phylocanvas.gl@latest/dist/bundle.min.js'
+    script.src = 'https://unpkg.com/@phylocanvas/phylocanvas.gl@1.59.0/dist/bundle.min.js'
     script.onload = () => {
       setTimeout(() => {
         if ((window as any).phylocanvas && (window as any).phylocanvas.PhylocanvasGL) {
