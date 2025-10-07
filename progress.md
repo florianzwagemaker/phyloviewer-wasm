@@ -36,6 +36,11 @@ This document tracks the progress of the PhyloViewer project.
 ### Additional Features
 - [ ] Implement "Back to Source" link in a tooltip on nodes.
 - [ ] Implement URL construction for the "Back to Source" link.
+- [x] Implement customizable leaf-node labels with multi-select dropdown.
+  - FASTA headers are stripped to accessionVersion before tree calculation
+  - SampleID is selected by default but can be toggled
+  - Users can select multiple metadata fields to append to labels
+  - Labels update dynamically when selections change
 
 ### Deployment
 - [ ] Configure the project for static hosting.
@@ -53,3 +58,14 @@ This document tracks the progress of the PhyloViewer project.
 - **Tree Calculation**: FastTree via @biowasm/aioli WebAssembly
 - **Visualization**: PhylocanvasGL loaded from CDN
 - **File Handling**: Browser-based URL fetching for FASTA and TSV files
+
+### Label Field Implementation
+- **FASTA Header Processing**: Input FASTA headers in format `accessionVersion|SampleID` are stripped to just `accessionVersion` before tree calculation
+- **Tree Node IDs**: All tree leaf nodes use only `accessionVersion` as their identifier
+- **Label Construction**: Labels are dynamically built by:
+  1. Starting with `accessionVersion` (always visible)
+  2. Appending selected metadata fields from the multi-select dropdown
+  3. Joining with `|` separator (e.g., `accessionVersion|SampleID|Country`)
+- **Default Behavior**: `SampleID` is selected by default when metadata loads
+- **Dynamic Updates**: Labels update in real-time when users change field selections
+- **Metadata Matching**: The `accessionVersion` serves as the key to match tree nodes with metadata records

@@ -15,12 +15,15 @@
           @update:color-map="handleColorMap" 
           @update:selected-field="handleSelectedField" 
           @update:search-term="handleSearchTerm"
+          @update:label-fields="handleLabelFields"
         />
         
         <!-- Debug information -->
         <div v-if="debugInfo" class="debug-info">
           <h4>Debug Info:</h4>
           <pre>{{ debugInfo }}</pre>
+          <h4>Current Label Fields:</h4>
+          <pre>{{ labelFields }}</pre>
         </div>
       </div>
       
@@ -38,6 +41,7 @@
           :color-map="colorMap"
           :selected-field="selectedField"
           :search-term="searchTerm"
+          :label-fields="labelFields"
         />
       </div>
     </div>
@@ -60,6 +64,7 @@ const newickTree = ref('')
 const colorMap = ref<Record<string, string>>({})
 const selectedField = ref<string | null>(null)
 const searchTerm = ref('')
+const labelFields = ref<string[]>(['SampleID'])
 const debugInfo = ref('')
 
 // Event handlers
@@ -89,11 +94,21 @@ const handleSearchTerm = (term: string) => {
   searchTerm.value = term
 }
 
+const handleLabelFields = (fields: string[]) => {
+  console.log('App.vue received labelFields update:', fields)
+  labelFields.value = [...fields]  // Create a new array to ensure reactivity
+  debugInfo.value += `\nLabel fields updated: ${fields.join(', ')}`
+}
+
 // Watch for important state changes
 watch(newickTree, (newTree) => {
   if (newTree) {
     debugInfo.value += `\nTree ready for visualization`
   }
+})
+
+watch(labelFields, (newFields) => {
+  console.log('Label fields changed to:', newFields)
 })
 </script>
 

@@ -25,3 +25,7 @@ This product should leverage existing (pre-compiled) WebAssembly modules where p
 
 ### Additional features
 * A user should be able to navigate back to the source-information panel from the visualization pane, this should be done through a tooltip that contains a "Back to Source" link. The standardized link should be provided as a URL parameter called 'source-link'. The metadata will contain an accession, and this accession should be the identifier used in the "Back to Source" link. This final URL for linkbacks should look like: 'https://source-link.com/seq/{accession}'
+
+* a user should be able to see pie-charts on internal nodes showing the distribution of metadata values for all descendant leaf nodes. For example, if a metadata field is "Country" and an internal node has 10 descendant leaves, 5 from USA, 3 from Canada and 2 from Mexico, the pie chart on that internal node should show 50% USA, 30% Canada and 20% Mexico.
+
+* The user should be able to change (up to a certain point) the labels of the leaf-nodes in the tree. The input fasta will always follow the format `accessionVersion|SampleID`. The accessionVersion should always be present as this is the matching key between metadata and the tree. However the user should be able to choose any additional metadata fields to append to the label, the should be optional but enabled by default. The user should be able to choose these additional fields through a multi-select dropdown in the side-panel.

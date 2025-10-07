@@ -114,25 +114,27 @@ interface Props {
   colorMap?: Record<string, string>
   selectedField?: string | null
   searchTerm?: string
+  labelFields?: string[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
   metadata: () => [],
   colorMap: () => ({}),
   selectedField: null,
-  searchTerm: ''
+  searchTerm: '',
+  labelFields: () => ['SampleID']
 })
 
 // Reactive state
 const treeCanvas = ref<HTMLElement | null>(null)
 const error = ref<string | null>(null)
-const showBranchLengths = ref(true) // Show scale by default
-const showLeafLabels = ref(true) // Show leaf labels by default
-const showScaleBar = ref(true) // Show custom scale bar by default
-const showPieCharts = ref(false) // Show pie charts on internal nodes
-const scaleBarLength = ref(100) // Length in pixels
-const scaleBarValue = ref(0.1) // Actual distance value
-const treeInstance = ref<any>(null) // Make reactive so v-if works
+const showBranchLengths = ref(true)
+const showLeafLabels = ref(true)
+const showScaleBar = ref(true)
+const showPieCharts = ref(false)
+const scaleBarLength = ref(100)
+const scaleBarValue = ref(0.1)
+const treeInstance = ref<any>(null)
 
 // Node tooltip state
 const nodeTooltip = ref({
@@ -175,27 +177,21 @@ const scaleBarLabel = computed(() => {
 
 // Computed property for tooltip positioning (global/fixed to body)
 const nodeTooltipGlobalStyle = computed(() => {
-  // Base position with drag offset
   let x = nodeTooltip.value.x + nodeTooltip.value.dragOffsetX
   let y = nodeTooltip.value.y + nodeTooltip.value.dragOffsetY
   
-  // Smart positioning to keep tooltip on screen (but don't auto-adjust when dragging)
   if (!nodeTooltip.value.isDragging) {
-    // Approximate tooltip dimensions (will be more accurate after render)
     const tooltipWidth = 300
     const tooltipHeight = 200
     
-    // Adjust if tooltip would go off the right edge
     if (x + tooltipWidth > window.innerWidth) {
       x = window.innerWidth - tooltipWidth - 10
     }
     
-    // Adjust if tooltip would go off the bottom edge
     if (y + tooltipHeight > window.innerHeight) {
       y = window.innerHeight - tooltipHeight - 10
     }
     
-    // Ensure tooltip doesn't go off the left or top edge
     x = Math.max(10, x)
     y = Math.max(10, y)
   }
@@ -210,11 +206,72 @@ const nodeTooltipGlobalStyle = computed(() => {
 })
 
 // Helper functions
+
+/**
+ * Extracts the accessionVersion from a node name.
+ * Since we strip FASTA headers before tree calculation, node names should already be just accessionVersions.
+ * However, we handle the legacy format (accessionVersion|SampleID) just in case.
+ */
 const extractAccessionVersion = (nodeName: string): string => {
-  // Split the node name by '|' and return the first part
+  // Node names are already just accessionVersions since we stripped headers before tree calculation
+  // But handle legacy format just in case
   return nodeName.split('|')[0];
 };
 
+/**
+ * Builds a display label for a tree node based on selected metadata fields.
+ * The label always starts with accessionVersion, followed by any selected metadata fields.
+ * Fields are joined with the '|' separator.
+ * 
+ * @param nodeName - The node ID from the tree (should be just the accessionVersion)
+ * @returns A formatted label string like "accessionVersion|SampleID|Country"
+ */
+const buildNodeLabel = (nodeName: string): string => {
+  // nodeName is already just the accessionVersion from the tree
+  const accessionVersion = extractAccessionVersion(nodeName);
+  
+  if (!props.metadata.length) {
+    // If no metadata, just show the accessionVersion
+    return accessionVersion;
+  }
+  
+  const metadataItem = props.metadata.find(item => item.accessionVersion === accessionVersion);
+  if (!metadataItem) {
+    // If no matching metadata, just show the accessionVersion
+    return accessionVersion;
+  }
+  
+  // Start with accessionVersion (always displayed)
+  const labelParts = [accessionVersion];
+  
+  // Add selected label fields in the order they appear in the array
+  if (props.labelFields && props.labelFields.length > 0) {
+    for (const field of props.labelFields) {
+      // Only add non-empty values
+      if (metadataItem[field] !== undefined && metadataItem[field] !== null && metadataItem[field] !== '') {
+        labelParts.push(metadataItem[field]);
+      }
+    }
+  }
+  
+  const finalLabel = labelParts.join('|');
+  
+  // Log only for the first node to avoid console spam
+  if (accessionVersion === props.metadata[0]?.accessionVersion) {
+    console.log('Building label for first node:', accessionVersion)
+    console.log('  Available labelFields:', props.labelFields)
+    console.log('  Metadata item:', metadataItem)
+    console.log('  Label parts:', labelParts)
+    console.log('  Final label:', finalLabel)
+  }
+  
+  return finalLabel;
+};
+
+/**
+ * Checks if a node matches the current search term.
+ * Searches across all metadata fields for the given node.
+ */
 const isNodeMatched = (nodeName: string): boolean => {
   const accessionVersion = extractAccessionVersion(nodeName);
   if (!props.searchTerm || !props.metadata.length) {
@@ -230,6 +287,10 @@ const isNodeMatched = (nodeName: string): boolean => {
   return false;
 };
 
+/**
+ * Gets the color for a node based on the selected metadata field and color mapping.
+ * Returns null if no color mapping is available.
+ */
 const getNodeColor = (nodeName: string): string | null => {
   const accessionVersion = extractAccessionVersion(nodeName);
   if (!props.selectedField || !Object.keys(props.colorMap).length || !props.metadata.length) {
@@ -243,6 +304,13 @@ const getNodeColor = (nodeName: string): string | null => {
   return null;
 }
 
+/**
+ * Generates style objects for all leaf nodes in the tree.
+ * Applies custom labels, search highlighting, and color mapping.
+ * 
+ * @param leaves - Array of leaf nodes from the tree graph
+ * @returns Object mapping node IDs to style properties
+ */
 const generateStyles = (leaves: any[]) => {
   if (!leaves || leaves.length === 0) {
     return {};
@@ -253,13 +321,17 @@ const generateStyles = (leaves: any[]) => {
   for (const leaf of leaves) {
     if (leaf.id) {
       const style: Record<string, any> = {};
-      // Search highlighting takes precedence
+      
+      // Update the label with custom formatting based on selected fields
+      style.label = buildNodeLabel(leaf.id);
+      
+      // Search highlighting takes precedence over color mapping
       if (props.searchTerm && isNodeMatched(leaf.id)) {
         style.fillColour = '#ff0000';
         style.strokeColour = '#cc0000';
         style.strokeWidth = 2;
       } else {
-        // Then apply color mapping
+        // Apply color mapping based on metadata field
         const color = getNodeColor(leaf.id);
         if (color) {
           style.fillColour = color;
@@ -274,17 +346,19 @@ const generateStyles = (leaves: any[]) => {
   return styles;
 }
 
-// Function to create metadata for pie charts based on leaf descendants
+/**
+ * Creates metadata object for pie chart visualization.
+ * Maps accessionVersions to their metadata values for the selected field.
+ * 
+ * @returns Object mapping accessionVersion to metadata field values
+ */
 const createMetadataForPieCharts = () => {
   if (!props.metadata || !props.selectedField) {
     return {};
   }
 
-  // Create a metadata object that maps node IDs to pie chart data
   const pieMetadata: Record<string, any> = {};
   
-  // For now, we'll create simple metadata for leaves
-  // In a real implementation, you'd calculate which descendants belong to which internal node
   props.metadata.forEach(item => {
     if (item.accessionVersion && props.selectedField && item[props.selectedField]) {
       pieMetadata[item.accessionVersion] = {
@@ -297,14 +371,23 @@ const createMetadataForPieCharts = () => {
 }
 
 // Tooltip functions
+
+/**
+ * Shows the node tooltip at the specified canvas coordinates.
+ * Displays different information for leaf vs internal nodes.
+ * 
+ * @param node - The tree node that was clicked
+ * @param canvasX - X coordinate relative to the tree canvas
+ * @param canvasY - Y coordinate relative to the tree canvas
+ */
 const showNodeTooltip = (node: any, canvasX: number, canvasY: number) => {
   console.log('Showing tooltip for node:', node)
   
-  // Calculate global screen coordinates
   const rect = treeCanvas.value?.getBoundingClientRect()
   if (!rect) return
   
-  const globalX = rect.left + canvasX + 10 // Offset from click position
+  // Convert canvas coordinates to global/fixed coordinates
+  const globalX = rect.left + canvasX + 10
   const globalY = rect.top + canvasY - 10
   
   nodeTooltip.value.visible = true
@@ -316,23 +399,21 @@ const showNodeTooltip = (node: any, canvasX: number, canvasY: number) => {
   console.log('Tooltip positioned at global coords:', globalX, globalY)
   
   if (node.isLeaf) {
-    // Leaf node
+    // Leaf node: show metadata
     nodeTooltip.value.nodeType = 'Leaf Node'
     nodeTooltip.value.isCollapsed = false
     
-    // Get metadata for leaf
     const accessionVersion = extractAccessionVersion(node.id || node.label || '')
     const metadataItem = props.metadata.find(item => item.accessionVersion === accessionVersion)
     nodeTooltip.value.metadata = metadataItem || null
     nodeTooltip.value.pieChartData = null
     nodeTooltip.value.descendantCount = 0
   } else {
-    // Internal node
+    // Internal node: show collapse option and pie chart data
     nodeTooltip.value.nodeType = 'Internal Node'
     nodeTooltip.value.isCollapsed = node.collapsed || false
     nodeTooltip.value.metadata = null
     
-    // Get pie chart data for internal node
     const descendants = getDescendantLeaves(node)
     nodeTooltip.value.descendantCount = descendants.length
     const pieData = calculatePieChartData(descendants)
@@ -340,6 +421,9 @@ const showNodeTooltip = (node: any, canvasX: number, canvasY: number) => {
   }
 }
 
+/**
+ * Hides the node tooltip and resets drag state.
+ */
 const hideNodeTooltip = () => {
   nodeTooltip.value.visible = false
   nodeTooltip.value.node = null
@@ -348,7 +432,9 @@ const hideNodeTooltip = () => {
   nodeTooltip.value.dragOffsetY = 0
 }
 
-// Drag functionality for tooltip
+/**
+ * Initiates tooltip drag operation.
+ */
 const startDrag = (event: MouseEvent) => {
   event.preventDefault()
   nodeTooltip.value.isDragging = true
@@ -357,11 +443,13 @@ const startDrag = (event: MouseEvent) => {
   
   console.log('Started dragging tooltip at:', event.clientX, event.clientY)
   
-  // Add global event listeners
   document.addEventListener('mousemove', onDrag)
   document.addEventListener('mouseup', stopDrag)
 }
 
+/**
+ * Handles tooltip drag movement.
+ */
 const onDrag = (event: MouseEvent) => {
   if (!nodeTooltip.value.isDragging) return
   
@@ -372,12 +460,15 @@ const onDrag = (event: MouseEvent) => {
   nodeTooltip.value.dragOffsetY = deltaY
 }
 
+/**
+ * Ends tooltip drag operation and finalizes position.
+ */
 const stopDrag = () => {
   if (!nodeTooltip.value.isDragging) return
   
   console.log('Stopped dragging tooltip')
   
-  // Update base position to include the drag offset
+  // Apply the offset to the base position
   nodeTooltip.value.x += nodeTooltip.value.dragOffsetX
   nodeTooltip.value.y += nodeTooltip.value.dragOffsetY
   
@@ -386,11 +477,13 @@ const stopDrag = () => {
   nodeTooltip.value.dragOffsetX = 0
   nodeTooltip.value.dragOffsetY = 0
   
-  // Remove global event listeners
   document.removeEventListener('mousemove', onDrag)
   document.removeEventListener('mouseup', stopDrag)
 }
 
+/**
+ * Toggles the collapse/expand state of an internal node.
+ */
 const toggleNodeCollapse = () => {
   if (!nodeTooltip.value.node || nodeTooltip.value.node.isLeaf) return
   
@@ -398,17 +491,21 @@ const toggleNodeCollapse = () => {
     treeInstance.value.collapseNode(nodeTooltip.value.node.id)
     console.log('Toggled collapse for node:', nodeTooltip.value.node.id)
     
-    // Update tooltip state
     nodeTooltip.value.isCollapsed = !nodeTooltip.value.isCollapsed
     
-    // Hide tooltip after action
+    // Hide tooltip after a short delay
     setTimeout(() => {
       hideNodeTooltip()
     }, 200)
   }
 }
 
-// Function to load PhylocanvasGL globally like in the CodePen
+/**
+ * Loads the PhylocanvasGL library from CDN.
+ * Uses a global phylocanvasLoaded flag to prevent duplicate loading.
+ * 
+ * @returns Promise that resolves when PhylocanvasGL is available
+ */
 const loadPhylocanvasGL = (): Promise<void> => {
   return new Promise((resolve, reject) => {
     // Check if already loaded
@@ -418,9 +515,8 @@ const loadPhylocanvasGL = (): Promise<void> => {
       return
     }
     
-    // Check if script is already being loaded
+    // Check if script tag already exists
     if (document.querySelector('script[src*="phylocanvas"]')) {
-      // Script is loading, wait for it
       const checkInterval = setInterval(() => {
         if ((window as any).phylocanvas && (window as any).phylocanvas.PhylocanvasGL) {
           phylocanvasLoaded = true
@@ -429,7 +525,6 @@ const loadPhylocanvasGL = (): Promise<void> => {
         }
       }, 100)
       
-      // Timeout after 10 seconds
       setTimeout(() => {
         clearInterval(checkInterval)
         reject(new Error('PhylocanvasGL loading timeout'))
@@ -439,11 +534,10 @@ const loadPhylocanvasGL = (): Promise<void> => {
     
     console.log('Loading PhylocanvasGL from CDN...')
     
-    // Load the script globally like in CodePen
+    // Create and load script tag
     const script = document.createElement('script')
     script.src = 'https://unpkg.com/@phylocanvas/phylocanvas.gl@latest/dist/bundle.min.js'
     script.onload = () => {
-      // Wait a bit for the global to be available
       setTimeout(() => {
         if ((window as any).phylocanvas && (window as any).phylocanvas.PhylocanvasGL) {
           console.log('PhylocanvasGL loaded successfully')
@@ -460,6 +554,10 @@ const loadPhylocanvasGL = (): Promise<void> => {
   })
 }
 
+/**
+ * Main function to render the phylogenetic tree.
+ * Loads PhylocanvasGL, creates the tree instance, and sets up event handlers.
+ */
 const renderTree = async () => {
   if (!treeCanvas.value || !props.newick) {
     return
@@ -468,7 +566,7 @@ const renderTree = async () => {
   try {
     error.value = null
     
-    // Clean up existing tree
+    // Clean up previous instance
     if (treeInstance.value) {
       try {
         if (typeof treeInstance.value.destroy === 'function') {
@@ -480,17 +578,14 @@ const renderTree = async () => {
       treeInstance.value = null
     }
 
-    // Clear container
     treeCanvas.value.innerHTML = ''
 
     console.log('Ensuring PhylocanvasGL is loaded...')
     
-    // Ensure PhylocanvasGL is loaded
     if (!phylocanvasLoaded) {
       await loadPhylocanvasGL()
     }
     
-    // Access PhylocanvasGL like in the CodePen example
     const PhylocanvasGL = (window as any).phylocanvas.PhylocanvasGL
     
     if (!PhylocanvasGL) {
@@ -499,34 +594,31 @@ const renderTree = async () => {
 
     console.log('Creating PhylocanvasGL instance...')
     
-    // Get container dimensions
     const containerRect = treeCanvas.value.getBoundingClientRect()
     const width = containerRect.width || 800
     const height = containerRect.height || 600
     
     console.log('Container dimensions:', { width, height })
     
-    // Create tree props with scale bar enabled
     const treeProps = {
       source: props.newick,
       size: { width, height },
       showLabels: true,
       showLeafLabels: showLeafLabels.value,
-      showBranchLengths: showBranchLengths.value, // This shows the scale/branch lengths
-      showPiecharts: showPieCharts.value, // Enable pie charts for collapsed nodes
-      showInternalLabels: false, // Don't show internal node labels (those floats you're seeing)
-      metadata: createMetadataForPieCharts(), // Prepare metadata for pie charts
+      showBranchLengths: showBranchLengths.value,
+      showPiecharts: showPieCharts.value,
+      showInternalLabels: false,
+      metadata: createMetadataForPieCharts(),
       interactive: true,
-      padding: 40 // Increased padding to prevent branches from reaching container edges
+      padding: 40
     }
     
     console.log('Tree props:', treeProps)
     console.log('Container element:', treeCanvas.value)
     
-    // Create new PhylocanvasGL instance
     treeInstance.value = new PhylocanvasGL(treeCanvas.value, treeProps)
     
-    // Override the selectNode method after creation
+    // Override selectNode to show our custom tooltip
     const originalSelectNode = treeInstance.value.selectNode
     treeInstance.value.selectNode = function(node: any) {
       console.log('selectNode called with:', node)
@@ -534,7 +626,6 @@ const renderTree = async () => {
       if (node) {
         console.log('Node clicked via selectNode:', node.label || 'internal node', node)
         
-        // Use node position if available, otherwise center of canvas
         const x = (node.x || 200)
         const y = (node.y || 200)
         
@@ -545,7 +636,6 @@ const renderTree = async () => {
         hideNodeTooltip()
       }
       
-      // Call original method if it exists
       if (originalSelectNode) {
         originalSelectNode.call(this, node)
       }
@@ -553,7 +643,6 @@ const renderTree = async () => {
 
     console.log('PhylocanvasGL instance created successfully:', treeInstance.value)
 
-    // Apply styling after tree is rendered
     await nextTick()
     applyNodeStyling()
     addPieChartLayer()
@@ -563,7 +652,7 @@ const renderTree = async () => {
     console.error('Error rendering tree with PhylocanvasGL:', err)
     error.value = `Failed to render tree: ${(err as Error).message}`
     
-    // Show error with tree data
+    // Show fallback error UI with tree data
     if (treeCanvas.value) {
       treeCanvas.value.innerHTML = `
         <div style="padding: 20px; text-align: center;">
@@ -585,6 +674,10 @@ const renderTree = async () => {
   }
 }
 
+/**
+ * Applies custom styling to all nodes in the tree.
+ * Updates labels, colors, and sets up zoom/pan event handlers.
+ */
 const applyNodeStyling = () => {
   if (!treeInstance.value) return
 
@@ -599,11 +692,10 @@ const applyNodeStyling = () => {
       console.log('Applied styling props using setProps:', newStyles)
     }
     
-    // Set up event handlers for zoom/pan to update scale bar
+    // Set up zoom/pan event handlers for scale bar updates
     if (typeof treeInstance.value.on === 'function') {
       console.log('Setting up zoom/pan event handlers')
       
-      // Add event listeners for zoom/pan to update scale bar
       treeInstance.value.on('zoom', () => {
         calculateScaleBar()
       })
@@ -618,12 +710,15 @@ const applyNodeStyling = () => {
   }
 }
 
-// Function to add custom pie chart layer for internal nodes
+/**
+ * Configures pie chart visualization on internal nodes.
+ * Pie charts show the distribution of metadata values among descendant leaves.
+ */
 const addPieChartLayer = () => {
   if (!treeInstance.value) return
 
   try {
-    // Remove existing layer if it exists
+    // Remove existing pie chart layer if present
     if (typeof treeInstance.value.removeLayer === 'function') {
       try {
         treeInstance.value.removeLayer('pie-charts')
@@ -633,11 +728,11 @@ const addPieChartLayer = () => {
     }
 
     if (!showPieCharts.value || !props.selectedField || !props.metadata.length) {
-      // Reset pie chart properties when disabled
+      // Disable pie charts
       if (treeInstance.value) {
         treeInstance.value.setProps({
           showPieCharts: false,
-          alignLabels: false, // Keep labels next to their nodes
+          alignLabels: false,
           showLabels: true
         })
       }
@@ -646,10 +741,9 @@ const addPieChartLayer = () => {
 
     console.log('Enabling pie charts with metadata field:', props.selectedField)
 
-    // Use the built-in pie chart functionality for collapsed nodes
     treeInstance.value.setProps({
       showPieCharts: true,
-      alignLabels: false, // Keep labels next to their nodes, not aligned to the right
+      alignLabels: false,
       showLabels: true
     })
 
@@ -660,7 +754,12 @@ const addPieChartLayer = () => {
   }
 }
 
-// Helper function to get all descendant leaves of a node
+/**
+ * Recursively collects all leaf nodes that are descendants of a given node.
+ * 
+ * @param node - The parent node to search from
+ * @returns Array of all descendant leaf nodes
+ */
 const getDescendantLeaves = (node: any): any[] => {
   if (node.isLeaf) return [node]
   
@@ -673,7 +772,13 @@ const getDescendantLeaves = (node: any): any[] => {
   return leaves
 }
 
-// Helper function to calculate pie chart data from descendants
+/**
+ * Calculates pie chart data for an internal node based on its descendant leaves.
+ * Groups descendants by the selected metadata field value.
+ * 
+ * @param descendants - Array of descendant leaf nodes
+ * @returns Array of pie chart segments with angles, colors, and values
+ */
 const calculatePieChartData = (descendants: any[]) => {
   if (!props.selectedField || !props.metadata.length) {
     console.log('No selected field or metadata for pie chart')
@@ -685,7 +790,6 @@ const calculatePieChartData = (descendants: any[]) => {
   const counts: Record<string, number> = {}
   let total = 0
 
-  // Count occurrences of each metadata value
   descendants.forEach(leaf => {
     const accessionVersion = extractAccessionVersion(leaf.id || leaf.label || '')
     const metadataItem = props.metadata.find(item => item.accessionVersion === accessionVersion)
@@ -707,7 +811,6 @@ const calculatePieChartData = (descendants: any[]) => {
     return []
   }
 
-  // Convert to pie chart segments
   const segments = []
   let currentAngle = 0
 
@@ -734,22 +837,22 @@ const calculatePieChartData = (descendants: any[]) => {
   return segments
 }
 
-// Function to calculate appropriate scale bar
+/**
+ * Calculates and updates the scale bar dimensions based on current tree zoom and branch scale.
+ * The scale bar displays a "nice" round number that represents evolutionary distance.
+ */
 const calculateScaleBar = () => {
   if (!treeInstance.value) return
 
   try {
-    // Get the current scale from PhylocanvasGL
     const branchScale = treeInstance.value.getBranchScale ? treeInstance.value.getBranchScale() : 1
     const zoom = treeInstance.value.getZoom ? treeInstance.value.getZoom() : 0
     const currentScale = branchScale * Math.pow(2, zoom)
     
-    // Calculate a nice round number for the scale bar
-    // We want the scale bar to be around 100 pixels long
     const targetPixelLength = 100
     const actualDistance = targetPixelLength / currentScale
     
-    // Round to a nice number (1, 2, 5, 10, 20, 50, 100, etc.)
+    // Round to a "nice" number (1, 2, 5, or 10 * power of 10)
     const magnitude = Math.pow(10, Math.floor(Math.log10(actualDistance)))
     const normalized = actualDistance / magnitude
     
@@ -764,7 +867,6 @@ const calculateScaleBar = () => {
       niceDistance = 10 * magnitude
     }
     
-    // Update scale bar values
     scaleBarValue.value = niceDistance
     scaleBarLength.value = niceDistance * currentScale
     
@@ -786,13 +888,14 @@ const calculateScaleBar = () => {
     
   } catch (err) {
     console.warn('Could not calculate scale bar:', err)
-    // Fallback values
     scaleBarValue.value = 0.1
     scaleBarLength.value = 100
   }
 }
 
-// Control update functions
+/**
+ * Updates the tree display to show/hide branch lengths.
+ */
 const updateBranchLengthsDisplay = () => {
   if (treeInstance.value && typeof treeInstance.value.setProps === 'function') {
     treeInstance.value.setProps({ showBranchLengths: showBranchLengths.value })
@@ -800,6 +903,9 @@ const updateBranchLengthsDisplay = () => {
   }
 }
 
+/**
+ * Updates the tree display to show/hide leaf labels.
+ */
 const updateLeafLabelsDisplay = () => {
   if (treeInstance.value && typeof treeInstance.value.setProps === 'function') {
     treeInstance.value.setProps({ showLeafLabels: showLeafLabels.value })
@@ -807,6 +913,9 @@ const updateLeafLabelsDisplay = () => {
   }
 }
 
+/**
+ * Updates the tree display to show/hide pie charts on internal nodes.
+ */
 const updatePieChartsDisplay = () => {
   if (treeInstance.value && typeof treeInstance.value.setProps === 'function') {
     treeInstance.value.setProps({ 
@@ -815,7 +924,6 @@ const updatePieChartsDisplay = () => {
     })
     console.log('Updated showPiecharts to:', showPieCharts.value)
     
-    // Re-add the custom pie chart layer
     addPieChartLayer()
   }
 }
@@ -826,6 +934,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  // Clean up tree instance
   if (treeInstance.value) {
     try {
       if (typeof treeInstance.value.destroy === 'function') {
@@ -847,15 +956,17 @@ watch(() => props.newick, () => {
   renderTree()
 })
 
-watch([() => props.colorMap, () => props.selectedField, () => props.searchTerm], () => {
+// Watch for changes to visualization properties
+// Deep watch on labelFields ensures array changes are detected
+watch([() => props.colorMap, () => props.selectedField, () => props.searchTerm, () => [...props.labelFields]], () => {
+  console.log('Props changed - labelFields:', props.labelFields)
   if (treeInstance.value && typeof treeInstance.value.setProps === 'function') {
     applyNodeStyling();
-    // Update pie chart metadata when field changes
     if (showPieCharts.value) {
       updatePieChartsDisplay();
     }
   }
-})
+}, { deep: true })
 </script>
 
 <style scoped>

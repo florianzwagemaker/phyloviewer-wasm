@@ -29,6 +29,20 @@ const emit = defineEmits<{
 const error = ref<string | null>(null)
 const isLoading = ref(false)
 
+// Helper function to strip SampleID from FASTA headers
+const stripFastaHeaders = (fastaContent: string): string => {
+  const lines = fastaContent.split('\n')
+  const strippedLines = lines.map(line => {
+    if (line.startsWith('>')) {
+      // Extract only the accessionVersion (before the first |)
+      const parts = line.substring(1).split('|')
+      return `>${parts[0]}`
+    }
+    return line
+  })
+  return strippedLines.join('\n')
+}
+
 // Tree calculation function
 const calculateTree = async () => {
   if (!props.fastaContent) {
@@ -42,13 +56,17 @@ const calculateTree = async () => {
     console.log('Starting tree calculation...')
     console.log('FASTA content length:', props.fastaContent.length)
     
+    // Strip SampleID and other fields from headers before tree calculation
+    const strippedFasta = stripFastaHeaders(props.fastaContent)
+    console.log('Stripped FASTA headers to accessionVersion only')
+    
     const biowasm = new BiowasmService(['fasttree/2.1.11'])
     console.log('BiowasmService created')
     
     await biowasm.init()
     console.log('Biowasm initialized')
 
-    const file = new File([props.fastaContent], 'input.fasta')
+    const file = new File([strippedFasta], 'input.fasta')
     await biowasm.mount(file)
     console.log('File mounted')
 
@@ -103,10 +121,6 @@ watch(() => props.fastaContent, (newContent) => {
 </script>
 
 <style scoped>
-.phylo-tree {
-  /* padding: 10px; */
-}
-
 .loading {
   color: #007bff;
   font-weight: bold;
