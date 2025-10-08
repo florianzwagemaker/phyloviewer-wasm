@@ -106,6 +106,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
+import { preloader } from '../services/preloader'
 
 // Props
 interface Props {
@@ -502,12 +503,21 @@ const toggleNodeCollapse = () => {
 
 /**
  * Loads the PhylocanvasGL library from CDN.
+ * First checks if preloader has already loaded it, otherwise loads on-demand.
  * Uses a global phylocanvasLoaded flag to prevent duplicate loading.
  * 
  * @returns Promise that resolves when PhylocanvasGL is available
  */
 const loadPhylocanvasGL = (): Promise<void> => {
   return new Promise((resolve, reject) => {
+    // Check if preloader has already loaded it
+    if (preloader.isPhylocanvasLoaded()) {
+      console.log('PhylocanvasGL already preloaded')
+      phylocanvasLoaded = true
+      resolve()
+      return
+    }
+    
     // Check if already loaded
     if ((window as any).phylocanvas && (window as any).phylocanvas.PhylocanvasGL) {
       phylocanvasLoaded = true

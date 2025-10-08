@@ -41,6 +41,10 @@ This document tracks the progress of the PhyloViewer project.
   - SampleID is selected by default but can be toggled
   - Users can select multiple metadata fields to append to labels
   - Labels update dynamically when selections change
+- [x] Implement preloading of external dependencies.
+  - All WASM modules and libraries load during app initialization
+  - Eliminates loading delays when users interact with features
+  - See PRELOADING.md for detailed documentation
 
 ### Deployment
 - [ ] Configure the project for static hosting.
@@ -58,6 +62,11 @@ This document tracks the progress of the PhyloViewer project.
 - **Tree Calculation**: FastTree via @biowasm/aioli WebAssembly
 - **Visualization**: PhylocanvasGL loaded from CDN
 - **File Handling**: Browser-based URL fetching for FASTA and TSV files
+- **Performance Optimization**: Preloading strategy for external dependencies
+  - PreloaderService singleton manages initialization of all external resources
+  - Biowasm/FastTree and PhylocanvasGL load in parallel during app startup
+  - Components use preloaded instances for instant response
+  - See `PRELOADING.md` for detailed implementation
 
 ### Label Field Implementation
 - **FASTA Header Processing**: Input FASTA headers in format `accessionVersion|SampleID` are stripped to just `accessionVersion` before tree calculation

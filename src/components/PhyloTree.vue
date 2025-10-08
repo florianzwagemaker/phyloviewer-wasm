@@ -11,7 +11,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { BiowasmService } from '../services/biowasm'
+import { preloader } from '../services/preloader'
 
 // Props
 interface Props {
@@ -60,11 +60,10 @@ const calculateTree = async () => {
     const strippedFasta = stripFastaHeaders(props.fastaContent)
     console.log('Stripped FASTA headers to accessionVersion only')
     
-    const biowasm = new BiowasmService(['fasttree/2.1.11'])
-    console.log('BiowasmService created')
-    
-    await biowasm.init()
-    console.log('Biowasm initialized')
+    // Get preloaded Biowasm instance
+    console.log('Getting preloaded Biowasm instance...')
+    const biowasm = await preloader.getBiowasmInstance()
+    console.log('Biowasm instance retrieved')
 
     const file = new File([strippedFasta], 'input.fasta')
     await biowasm.mount(file)
@@ -106,7 +105,16 @@ const calculateTree = async () => {
     
   } catch (err) {
     console.error('Error calculating tree:', err)
-    error.value = `Failed to calculate tree: ${(err as Error).message}`
+    const errorMsg = (err as Error).message
+    
+    // Provide user-friendly error messages
+    if (errorMsg.includes('FastTree')) {
+      error.value = 'Unable to initialize tree calculation tool. Please check your internet connection and try again.'
+    } else if (errorMsg.includes('Network') || errorMsg.includes('network')) {
+      error.value = 'Network error. Please check your internet connection and try again.'
+    } else {
+      error.value = `Failed to calculate tree: ${errorMsg}`
+    }
   } finally {
     isLoading.value = false
   }

@@ -11,9 +11,9 @@ export class BiowasmService {
   async init() {
     try {
       console.log('Creating Aioli instance with tools:', this.tools);
-      // Aioli constructor returns a Promise
       this.aioli = await new Aioli(this.tools);
       console.log('Aioli initialized successfully');
+      return this.aioli;
     } catch (error) {
       console.error('Failed to initialize Aioli:', error);
       throw error;
@@ -21,6 +21,10 @@ export class BiowasmService {
   }
 
   async exec(command: string, args: string[] = []) {
+    if (!this.aioli) {
+      throw new Error('Aioli not initialized. Call init() first.');
+    }
+    
     try {
       const fullCommand = `${command} ${args.join(' ')}`;
       console.log('Executing command:', fullCommand);
@@ -34,6 +38,10 @@ export class BiowasmService {
   }
 
   async mount(file: File) {
+    if (!this.aioli) {
+      throw new Error('Aioli not initialized. Call init() first.');
+    }
+    
     try {
       // Use Aioli's mount method to mount the file
       await this.aioli.mount(file);

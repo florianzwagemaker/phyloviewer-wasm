@@ -1,6 +1,15 @@
 <template>
   <div class="app-container">
-    <h1>PhyloVuewer</h1>
+    <!-- Preloading indicator -->
+    <div v-if="isPreloading" class="preload-overlay">
+      <div class="preload-content">
+        <div class="spinner"></div>
+        <h2>Initializing PhyloViewer...</h2>
+        <p>Loading dependencies (FastTree, PhylocanvasGL)</p>
+      </div>
+    </div>
+    
+    <h1>PhyloViewer</h1>
     <p>WASM-based phylogenetic tree calculation with fasttree and rendering with Vue + PhylocanvasGL</p>
     <div class="controls-section">
       <FastaLoader @update:fasta-content="handleFastaContent" />
@@ -49,12 +58,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import FastaLoader from './components/FastaLoader.vue'
 import MetadataLoader from './components/MetadataLoader.vue'
 import PhyloTree from './components/PhyloTree.vue'
 import PhylocanvasViewer from './components/PhylocanvasViewer.vue'
 import SidePanel from './components/SidePanel.vue'
+import { preloader } from './services/preloader'
 import './App.css'
 
 // Reactive state
@@ -66,6 +76,31 @@ const selectedField = ref<string | null>(null)
 const searchTerm = ref('')
 const labelFields = ref<string[]>(['SampleID'])
 const debugInfo = ref('')
+const isPreloading = ref(true)
+
+// Preload all dependencies on app mount
+onMounted(async () => {
+  try {
+    debugInfo.value = 'Preloading dependencies...'
+    await preloader.preloadAll()
+    
+    // Check what actually loaded
+    const status = preloader.getLoadingStatus()
+    if (status.all) {
+      debugInfo.value = 'All dependencies preloaded successfully!'
+    } else if (status.biowasm || status.phylocanvas) {
+      debugInfo.value = 'Some dependencies preloaded (others will load on-demand)'
+    } else {
+      debugInfo.value = 'Using on-demand loading (preload failed)'
+    }
+    
+    isPreloading.value = false
+  } catch (error) {
+    console.error('Error preloading dependencies:', error)
+    debugInfo.value = `Preload incomplete - using on-demand loading`
+    isPreloading.value = false
+  }
+})
 
 // Event handlers
 const handleFastaContent = (content: string) => {
@@ -117,6 +152,55 @@ watch(labelFields, (newFields) => {
   /* padding: 20px; */
   max-width: 1200px;
   margin: 0 auto;
+  position: relative;
+}
+
+.preload-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.preload-content {
+  text-align: center;
+  padding: 40px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+.preload-content h2 {
+  margin: 20px 0 10px 0;
+  color: #333;
+  font-size: 24px;
+}
+
+.preload-content p {
+  margin: 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.spinner {
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #007bff;
+  border-radius: 50%;
+  width: 50px;
+  height: 50px;
+  animation: spin 1s linear infinite;
+  margin: 0 auto;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 .controls-section {
